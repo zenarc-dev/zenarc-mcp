@@ -1,6 +1,6 @@
 {
   "name": "zenarc-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "ZenArc MCP server — AI-native task management for Claude Code via Model Context Protocol",
   "type": "module",
   "bin": {
@@ -47,6 +47,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yosukesakurai/zenarc-mcp.git"
+    "url": "git+https://github.com/zenarc-dev/zenarc-mcp.git"
   }
 }
