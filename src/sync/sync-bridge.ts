@@ -2,8 +2,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { validateTask, type Task, type ProjectConfig } from "../core/index.js";
-import { YamlTaskStore } from "../core/index.js";
+import { validateTask, type Task, type ProjectConfig, YamlTaskStore } from "@zenarc/core";
 import { FirestoreTaskStore } from "./firestore-store.js";
 
 export type SyncBridgeOptions = {

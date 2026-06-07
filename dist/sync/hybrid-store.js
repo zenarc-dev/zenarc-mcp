@@ -1,4 +1,4 @@
-import { YamlTaskStore } from "../core/index.js";
+import { YamlTaskStore } from "@zenarc/core";
 import { FirestoreTaskStore } from "./firestore-store.js";
 export class HybridTaskStore {
     yamlStore;

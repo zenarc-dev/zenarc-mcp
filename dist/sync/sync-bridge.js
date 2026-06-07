@@ -2,8 +2,7 @@ import { watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { validateTask } from "../core/index.js";
-import { YamlTaskStore } from "../core/index.js";
+import { validateTask, YamlTaskStore } from "@zenarc/core";
 import { FirestoreTaskStore } from "./firestore-store.js";
 export class SyncBridge {
     yamlStore = new YamlTaskStore();

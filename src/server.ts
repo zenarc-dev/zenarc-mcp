@@ -16,8 +16,77 @@ import {
   generateTaskId,
   validateTask,
   type Task,
-} from "./core/index.js";
+} from "@zenarc/core";
 import { initializeStore } from "./store-init.js";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/* ------------------------------------------------------------------ */
+/*  CLI helpers                                                       */
+/* ------------------------------------------------------------------ */
+
+function getPackageVersion(): string {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = join(__dirname, "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function handleCLI(): boolean {
+  const args = process.argv.slice(2);
+  if (args.length === 0) return false;
+
+  const cmd = args[0];
+
+  if (cmd === "--version" || cmd === "-v") {
+    console.log(`zenarc-mcp ${getPackageVersion()}`);
+    return true;
+  }
+
+  if (cmd === "update" || cmd === "--update") {
+    const current = getPackageVersion();
+    console.log(`Current version: ${current}`);
+    try {
+      const latest = execSync("npm view zenarc-mcp version", {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"],
+      }).trim();
+      if (latest === current) {
+        console.log("✅ zenarc-mcp is already up to date.");
+      } else {
+        console.log(`Update available: ${current} → ${latest}`);
+        console.log("Running npm update -g zenarc-mcp ...");
+        execSync("npm update -g zenarc-mcp", { stdio: "inherit" });
+        console.log("✅ Update complete. Restart Claude Code to use the new version.");
+      }
+    } catch (err) {
+      console.error("❌ Failed to check for updates:", (err as Error).message);
+      process.exit(1);
+    }
+    return true;
+  }
+
+  if (cmd === "--help" || cmd === "-h") {
+    console.log(`zenarc-mcp — AI-native task manager for Claude Code
+
+Usage:
+  zenarc-mcp              Start the MCP server (stdio)
+  zenarc-mcp --version    Show version
+  zenarc-mcp update       Check for updates and install latest
+  zenarc-mcp --help       Show this help
+`);
+    return true;
+  }
+
+  console.error(`Unknown command: ${cmd}\nRun "zenarc-mcp --help" for usage.`);
+  process.exit(1);
+}
 
 const server = new Server(
   {
@@ -119,7 +188,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Assignee (human, claude, etc.)",
             },
-            notes: { type: "string", description: "Context notes" },
+            description: { type: "string", description: "Task description" },
             files: {
               type: "array",
               items: { type: "string" },
@@ -157,10 +226,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             title: { type: "string" },
             assigned_to: { type: "string" },
             tags: { type: "array", items: { type: "string" } },
-            notes: { type: "string" },
-            append_notes: {
+            description: { type: "string" },
+            append_description: {
               type: "string",
-              description: "Append text to existing notes",
+              description: "Append text to existing description",
             },
           },
           required: ["taskId"],
@@ -168,7 +237,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "zenarc_search",
-        description: "Search tasks by keyword across titles, tags, and notes.",
+        description: "Search tasks by keyword across titles, tags, and description.",
         inputSchema: {
           type: "object",
           properties: {
@@ -194,6 +263,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             note: { type: "string", description: "Note to append" },
           },
           required: ["taskId"],
+        },
+      },
+      {
+        name: "zenarc_upgrade",
+        description:
+          "Upgrade all task YAML files across all projects to the latest schema version. Re-validates and rewrites every task file.",
+        inputSchema: {
+          type: "object",
+          properties: {},
         },
       },
     ],
@@ -328,7 +406,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           priority = "medium",
           tags = [],
           assigned_to,
-          notes = "",
+          description = "",
           files = [],
           urls = [],
           dependencies = [],
@@ -339,7 +417,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           priority?: string;
           tags?: string[];
           assigned_to?: string;
-          notes?: string;
+          description?: string;
           files?: string[];
           urls?: string[];
           dependencies?: string[];
@@ -370,7 +448,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           updated_at: now,
           created_by: "claude",
           assigned_to,
-          context: { files, urls, notes },
+          context: { files, urls, description },
           dependencies,
         });
 
@@ -394,8 +472,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           title,
           assigned_to,
           tags,
-          notes,
-          append_notes,
+          description,
+          append_description,
         } = args as {
           taskId: string;
           status?: string;
@@ -403,8 +481,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           title?: string;
           assigned_to?: string;
           tags?: string[];
-          notes?: string;
-          append_notes?: string;
+          description?: string;
+          append_description?: string;
         };
 
         const registry = await getRegistry();
@@ -432,9 +510,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (title !== undefined) task.title = title;
         if (assigned_to !== undefined) task.assigned_to = assigned_to;
         if (tags !== undefined) task.tags = tags;
-        if (notes !== undefined) task.context.notes = notes;
-        if (append_notes !== undefined)
-          task.context.notes += "\n" + append_notes;
+        if (description !== undefined) task.context.description = description;
+        if (append_description !== undefined)
+          task.context.description += "\n" + append_description;
 
         task.updated_at = new Date().toISOString();
 
@@ -536,7 +614,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (file) task.context.files.push(file);
         if (url) task.context.urls.push(url);
-        if (note) task.context.notes += "\n" + note;
+        if (note) task.context.description += "\n" + note;
 
         task.updated_at = new Date().toISOString();
         await writeTask(projectPath, task);
@@ -546,6 +624,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Added context to task ${taskId}.`,
+            },
+          ],
+        };
+      }
+
+      case "zenarc_upgrade": {
+        const registry = await getRegistry();
+        let upgraded = 0;
+        let errors = 0;
+
+        for (const project of registry) {
+          const tasks = await listProjectTasks(project.path);
+          for (const task of tasks) {
+            try {
+              await writeTask(project.path, task);
+              upgraded++;
+            } catch {
+              errors++;
+            }
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Upgraded ${upgraded} task files to the latest schema.${errors > 0 ? ` ${errors} errors.` : ""}`,
             },
           ],
         };
@@ -569,6 +674,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  if (handleCLI()) return;
   await initializeStore();
 
   // First-run welcome

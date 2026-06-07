@@ -1,7 +1,7 @@
 import { mkdir, access, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { setDefaultStore, getRegistry, saveRegistry } from "./core/index.js";
+import { setDefaultStore, getRegistry, saveRegistry } from "@zenarc/core";
 
 const ZENARC_DIR = join(homedir(), ".zenarc");
 const REGISTRY_PATH = join(ZENARC_DIR, "projects.json");

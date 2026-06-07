@@ -1,6 +1,6 @@
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-import { validateTask, } from "../core/index.js";
+import { validateTask, } from "@zenarc/core";
 import { join } from "node:path";
 import { homedir } from "node:os";
 let firebaseApp = null;
@@ -33,7 +33,7 @@ function taskToDoc(task) {
         context: {
             files: task.context.files,
             urls: task.context.urls,
-            notes: task.context.notes,
+            description: task.context.description,
         },
     };
 }
@@ -52,7 +52,7 @@ function docToTask(data) {
         context: {
             files: data.context?.files || [],
             urls: data.context?.urls || [],
-            notes: data.context?.notes || "",
+            description: data.context?.description || data.context?.notes || "",
         },
         dependencies: data.dependencies || [],
     });
@@ -176,7 +176,7 @@ export class FirestoreTaskStore {
                 return true;
             const text = [
                 task.title,
-                task.context.notes,
+                task.context.description,
                 ...task.tags,
                 task.project,
                 task.assigned_to || "",

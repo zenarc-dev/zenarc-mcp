@@ -5,7 +5,7 @@ import {
   type Task,
   type TaskStore,
   type ProjectConfig,
-} from "../core/index.js";
+} from "@zenarc/core";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -42,7 +42,7 @@ function taskToDoc(task: Task): DocumentData {
     context: {
       files: task.context.files,
       urls: task.context.urls,
-      notes: task.context.notes,
+      description: task.context.description,
     },
   };
 }
@@ -62,7 +62,7 @@ function docToTask(data: DocumentData): Task {
     context: {
       files: data.context?.files || [],
       urls: data.context?.urls || [],
-      notes: data.context?.notes || "",
+      description: data.context?.description || data.context?.notes || "",
     },
     dependencies: data.dependencies || [],
   });
@@ -208,7 +208,7 @@ export class FirestoreTaskStore implements TaskStore {
 
       const text = [
         task.title,
-        task.context.notes,
+        task.context.description,
         ...task.tags,
         task.project,
         task.assigned_to || "",

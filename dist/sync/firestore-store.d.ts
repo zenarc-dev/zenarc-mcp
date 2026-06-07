@@ -1,5 +1,5 @@
 import { type App } from "firebase-admin/app";
-import { type Task, type TaskStore, type ProjectConfig } from "../core/index.js";
+import { type Task, type TaskStore, type ProjectConfig } from "@zenarc/core";
 export declare function initializeFirebase(credentialPath?: string): Promise<App>;
 export declare function getFirebaseApp(): App;
 export declare class FirestoreTaskStore implements TaskStore {

@@ -1,11 +1,11 @@
 {
   "name": "zenarc-mcp",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "ZenArc MCP server — AI-native task management for Claude Code via Model Context Protocol",
   "type": "module",
   "bin": {
     "zenarc-mcp": "dist/server.js",
-    "zenarc-migrate": "dist/core/bin/migrate.js"
+    "zenarc-migrate": "dist/bin/migrate.js"
   },
   "files": [
     "dist",
@@ -17,17 +17,17 @@
   },
   "scripts": {
     "build": "tsc",
-    "postbuild": "chmod +x dist/server.js dist/core/bin/migrate.js",
+    "postbuild": "chmod +x dist/server.js dist/bin/migrate.js",
     "dev": "tsc --watch",
     "start": "node dist/server.js",
-    "migrate": "node dist/core/bin/migrate.js",
+    "migrate": "node dist/bin/migrate.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@zenarc/core": "^1.1.0",
     "firebase-admin": "^13.0.0",
-    "yaml": "^2.7.0",
-    "zod": "^3.24.0"
+    "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

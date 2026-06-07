@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { migrateProject } from "../migrate.js";
+import { migrateProject } from "@zenarc/core";
 
 async function main() {
   const args = process.argv.slice(2);
