@@ -1,11 +1,11 @@
 {
   "name": "zenarc-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "ZenArc MCP server — AI-native task management for Claude Code via Model Context Protocol",
   "type": "module",
   "bin": {
-    "zenarc-mcp": "./dist/server.js",
-    "zenarc-migrate": "./dist/core/bin/migrate.js"
+    "zenarc-mcp": "dist/server.js",
+    "zenarc-migrate": "dist/core/bin/migrate.js"
   },
   "files": [
     "dist",

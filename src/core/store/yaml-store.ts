@@ -451,71 +451,74 @@ export class YamlTaskStore implements TaskStore {
   async scanForProjects(rootPaths: string[]): Promise<ProjectConfig[]> {
     const { readdir } = await import("node:fs/promises");
     const found: ProjectConfig[] = [];
+    const seen = new Set<string>();
+
+    const checkProject = async (projectPath: string, name: string): Promise<boolean> => {
+      if (seen.has(projectPath)) return false;
+
+      // Check for .zenarc/tasks/ directory (new format)
+      try {
+        const tasksDir = this.getProjectTasksDir(projectPath);
+        await access(tasksDir);
+        const files = await readdir(tasksDir);
+        if (files.some(isPotentialTaskFile)) {
+          found.push({ name, path: projectPath, format: "yaml" });
+          seen.add(projectPath);
+          return true;
+        }
+      } catch {
+        // No .zenarc/tasks/ directory
+      }
+
+      // Check for .zenarc/overview.yml
+      try {
+        await access(getProjectOverviewPath(projectPath));
+        found.push({ name, path: projectPath, format: "yaml" });
+        seen.add(projectPath);
+        return true;
+      } catch {
+        // No .zenarc/overview.yml
+      }
+
+      // Check for .zenarc.yml config file (legacy)
+      try {
+        await access(join(projectPath, ".zenarc.yml"));
+        found.push({ name, path: projectPath, format: "yaml" });
+        seen.add(projectPath);
+        return true;
+      } catch {
+        // No .zenarc.yml
+      }
+
+      // Backward compatibility: check for legacy task files in root
+      try {
+        const files = await readdir(projectPath);
+        const hasTaskFiles = files.some((f) => isLegacyTaskFilename(f));
+        if (hasTaskFiles) {
+          found.push({ name, path: projectPath, format: "yaml" });
+          seen.add(projectPath);
+          return true;
+        }
+      } catch {
+        // Can't read directory
+      }
+
+      return false;
+    };
 
     for (const root of rootPaths) {
+      // First, check if the root path itself is a project
+      const rootName = root.split("/").pop() || root;
+      const isProject = await checkProject(root, rootName);
+      if (isProject) continue;
+
+      // Then scan subdirectories (original behavior)
       try {
         const entries = await readdir(root, { withFileTypes: true });
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
           const projectPath = join(root, entry.name);
-
-          // Check for .zenarc/tasks/ directory (new format)
-          try {
-            const tasksDir = this.getProjectTasksDir(projectPath);
-            await access(tasksDir);
-            const files = await readdir(tasksDir);
-            if (files.some(isPotentialTaskFile)) {
-              found.push({
-                name: entry.name,
-                path: projectPath,
-                format: "yaml",
-              });
-              continue;
-            }
-          } catch {
-            // No .zenarc/tasks/ directory
-          }
-
-          // Check for .zenarc/overview.yml
-          try {
-            await access(getProjectOverviewPath(projectPath));
-            found.push({
-              name: entry.name,
-              path: projectPath,
-              format: "yaml",
-            });
-            continue;
-          } catch {
-            // No .zenarc/overview.yml
-          }
-
-          // Check for .zenarc.yml config file (legacy)
-          try {
-            await access(join(projectPath, ".zenarc.yml"));
-            found.push({
-              name: entry.name,
-              path: projectPath,
-              format: "yaml",
-            });
-            continue;
-          } catch {
-            // No .zenarc.yml
-          }
-
-          // Backward compatibility: check for legacy task files in root
-          try {
-            const files = await readdir(projectPath);
-            const hasTaskFiles = files.some((f) => isLegacyTaskFilename(f));
-            if (hasTaskFiles) {
-              found.push({
-                name: entry.name,
-                path: projectPath,
-                format: "yaml",
-              });
-            }
-          } catch {
-            // Can't read directory
-          }
+          await checkProject(projectPath, entry.name);
         }
       } catch {
         // Root path doesn't exist or isn't readable
