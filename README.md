@@ -6,8 +6,16 @@ ZenArc replaces scattered `TODO.md` files with structured, agent-friendly YAML t
 
 ## Install
 
+### From npm
+
 ```bash
 npm install -g zenarc-mcp
+```
+
+### From GitHub
+
+```bash
+npm install -g zenarc-dev/zenarc-mcp
 ```
 
 Requires Node.js ≥ 20.
