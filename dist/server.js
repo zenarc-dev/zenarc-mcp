@@ -2,7 +2,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
-import { getRegistry, addProject, listProjectTasks, readTask, writeTask, searchTasks, scanForProjects, generateTaskId, validateTask, safeValidateTask, repairTaskData, detectSchemaVersion, CURRENT_SCHEMA_VERSION, TaskSchema, } from "@zenarc/core";
+import { getRegistry, addProject, listProjectTasks, readTask, writeTask, deleteTask, searchTasks, scanForProjects, generateTaskId, validateTask, safeValidateTask, repairTaskData, detectSchemaVersion, CURRENT_SCHEMA_VERSION, TaskSchema, } from "@zenarc/core";
 import { initializeStore } from "./store-init.js";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -207,6 +207,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                             type: "string",
                             description: "Append text to existing description",
                         },
+                    },
+                    required: ["taskId"],
+                },
+            },
+            {
+                name: "zenarc_delete",
+                description: "Delete a task by its ID. This action cannot be undone.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        taskId: { type: "string", description: "Task ID to delete (e.g., tm-20260602-a1b2c3d4)" },
                     },
                     required: ["taskId"],
                 },
@@ -437,6 +448,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+            case "zenarc_delete": {
+                const { taskId } = args;
+                const registry = await getRegistry();
+                let deleted = false;
+                for (const project of registry) {
+                    const task = await readTask(project.path, taskId);
+                    if (task) {
+                        await deleteTask(project.path, taskId);
+                        deleted = true;
+                        break;
+                    }
+                }
+                if (!deleted) {
+                    return {
+                        content: [
+                            { type: "text", text: `Task ${taskId} not found.` },
+                        ],
+                        isError: true,
+                    };
+                }
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Deleted task ${taskId}.`,
+                        },
+                    ],
+                };
+            }
             case "zenarc_search": {
                 const { query, project, status, priority, tag, limit = 20, } = args;
                 const results = await searchTasks(query, {
@@ -511,7 +551,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     const tasksDir = join(project.path, ".zenarc", "tasks");
                     let files = [];
                     try {
-                        files = (await readdir(tasksDir)).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+                        files = (await readdir(tasksDir)).filter((f) => (f.endsWith(".yaml") || f.endsWith(".yml")) &&
+                            f !== "config.yml" && f !== "config.yaml" && f !== "overview.yml" && f !== "overview.yaml");
                     }
                     catch {
                         continue;

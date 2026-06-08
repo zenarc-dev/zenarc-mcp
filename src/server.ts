@@ -11,6 +11,7 @@ import {
   listProjectTasks,
   readTask,
   writeTask,
+  deleteTask,
   searchTasks,
   scanForProjects,
   generateTaskId,
@@ -237,6 +238,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Append text to existing description",
             },
+          },
+          required: ["taskId"],
+        },
+      },
+      {
+        name: "zenarc_delete",
+        description: "Delete a task by its ID. This action cannot be undone.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            taskId: { type: "string", description: "Task ID to delete (e.g., tm-20260602-a1b2c3d4)" },
           },
           required: ["taskId"],
         },
@@ -548,6 +560,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "zenarc_delete": {
+        const { taskId } = args as { taskId: string };
+        const registry = await getRegistry();
+        let deleted = false;
+
+        for (const project of registry) {
+          const task = await readTask(project.path, taskId);
+          if (task) {
+            await deleteTask(project.path, taskId);
+            deleted = true;
+            break;
+          }
+        }
+
+        if (!deleted) {
+          return {
+            content: [
+              { type: "text", text: `Task ${taskId} not found.` },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Deleted task ${taskId}.`,
+            },
+          ],
+        };
+      }
+
       case "zenarc_search": {
         const {
           query,
@@ -661,7 +706,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           let files: string[] = [];
           try {
             files = (await readdir(tasksDir)).filter((f) =>
-              f.endsWith(".yaml") || f.endsWith(".yml")
+              (f.endsWith(".yaml") || f.endsWith(".yml")) &&
+              f !== "config.yml" && f !== "config.yaml" && f !== "overview.yml" && f !== "overview.yaml"
             );
           } catch {
             continue;
