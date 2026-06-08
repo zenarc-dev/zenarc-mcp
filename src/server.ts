@@ -15,11 +15,17 @@ import {
   scanForProjects,
   generateTaskId,
   validateTask,
+  safeValidateTask,
+  repairTaskData,
+  detectSchemaVersion,
+  CURRENT_SCHEMA_VERSION,
+  TaskSchema,
   type Task,
 } from "@zenarc/core";
 import { initializeStore } from "./store-init.js";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -266,12 +272,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "zenarc_upgrade",
+        name: "zenarc_update_schema",
         description:
           "Upgrade all task YAML files across all projects to the latest schema version. Re-validates and rewrites every task file.",
         inputSchema: {
           type: "object",
           properties: {},
+        },
+      },
+      {
+        name: "zenarc_validate_schema",
+        description:
+          "Validate all task YAML files across projects and repair corrupted ones by injecting missing required fields (id, title, status, priority, project, tags, created_at, updated_at, created_by, context, dependencies). Does NOT migrate schema versions. Optionally target a single project.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: {
+              type: "string",
+              description: "Project name to validate/repair. If omitted, scans all projects.",
+            },
+          },
         },
       },
     ],
@@ -629,30 +649,164 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case "zenarc_upgrade": {
+      case "zenarc_update_schema": {
         const registry = await getRegistry();
         let upgraded = 0;
-        let errors = 0;
+        let current = 0;
+        let failed = 0;
 
         for (const project of registry) {
-          const tasks = await listProjectTasks(project.path);
-          for (const task of tasks) {
+          const tasksDir = join(project.path, ".zenarc", "tasks");
+          let files: string[] = [];
+          try {
+            files = (await readdir(tasksDir)).filter((f) =>
+              f.endsWith(".yaml") || f.endsWith(".yml")
+            );
+          } catch {
+            continue;
+          }
+
+          for (const filename of files) {
+            const filePath = join(tasksDir, filename);
+            let raw: unknown;
             try {
-              await writeTask(project.path, task);
+              const content = await readFile(filePath, "utf-8");
+              raw = (await import("yaml")).parse(content);
+            } catch {
+              failed++;
+              continue;
+            }
+
+            const detectedVersion = detectSchemaVersion(raw);
+            if (detectedVersion >= CURRENT_SCHEMA_VERSION) {
+              current++;
+              continue;
+            }
+
+            const result = safeValidateTask(raw, project.name);
+            if (!result.success) {
+              failed++;
+              continue;
+            }
+
+            try {
+              await writeTask(project.path, result.data);
               upgraded++;
             } catch {
-              errors++;
+              failed++;
             }
           }
         }
 
+        let text = `Upgraded ${upgraded} task file(s) to schema v${CURRENT_SCHEMA_VERSION}.`;
+        if (current > 0) {
+          text += ` ${current} file(s) already at current version.`;
+        }
+        if (failed > 0) {
+          text += ` ${failed} file(s) failed.`;
+        }
+
         return {
-          content: [
-            {
-              type: "text",
-              text: `Upgraded ${upgraded} task files to the latest schema.${errors > 0 ? ` ${errors} errors.` : ""}`,
-            },
-          ],
+          content: [{ type: "text", text }],
+        };
+      }
+
+      case "zenarc_validate_schema": {
+        const { project } = args as { project?: string };
+        const registry = await getRegistry();
+        let projects = registry;
+        if (project) {
+          projects = projects.filter((p) => p.name === project);
+          if (projects.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Project "${project}" not found in registry.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+
+        const repairedFiles: { project: string; file: string; taskId: string }[] = [];
+        let skipped = 0;
+        let failed = 0;
+
+        for (const proj of projects) {
+          const tasksDir = join(proj.path, ".zenarc", "tasks");
+          let files: string[] = [];
+          try {
+            files = (await readdir(tasksDir)).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
+          } catch {
+            continue;
+          }
+
+          for (const filename of files) {
+            const filePath = join(tasksDir, filename);
+            let raw: unknown;
+            try {
+              const content = await readFile(filePath, "utf-8");
+              raw = (await import("yaml")).parse(content);
+            } catch {
+              failed++;
+              continue;
+            }
+
+            const rawSnapshot = JSON.parse(JSON.stringify(raw));
+            const repaired = repairTaskData(raw, {
+              projectName: proj.name,
+              targetVersion: detectSchemaVersion(raw),
+            });
+            const result = TaskSchema.safeParse(repaired);
+            if (!result.success) {
+              failed++;
+              continue;
+            }
+
+            const wasRepaired = JSON.stringify(rawSnapshot) !== JSON.stringify(repaired);
+            if (!wasRepaired) {
+              skipped++;
+              continue;
+            }
+
+            try {
+              const yaml = (await import("yaml")).stringify(result.data, {
+                indent: 2,
+                sortMapEntries: false,
+              });
+              await writeFile(filePath, yaml, "utf-8");
+              repairedFiles.push({
+                project: proj.name,
+                file: filename,
+                taskId: result.data.id,
+              });
+            } catch {
+              failed++;
+            }
+          }
+        }
+
+        let text = "";
+        if (repairedFiles.length > 0) {
+          text += `Repaired ${repairedFiles.length} task file(s):\n`;
+          for (const r of repairedFiles) {
+            text += `- ${r.project}/${r.file} (${r.taskId}): repaired\n`;
+          }
+        }
+        if (skipped > 0) {
+          text += `\nSkipped ${skipped} valid task file(s).`;
+        }
+        if (failed > 0) {
+          text += `\nFailed to process ${failed} file(s).`;
+        }
+        if (repairedFiles.length === 0 && failed === 0) {
+          text = "All task files are valid and up to date.";
+        }
+
+        return {
+          content: [{ type: "text", text: text.trim() }],
         };
       }
 
