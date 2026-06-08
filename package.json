@@ -1,6 +1,6 @@
 {
   "name": "zenarc-mcp",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "ZenArc MCP server — AI-native task management for Claude Code via Model Context Protocol",
   "type": "module",
   "bin": {
