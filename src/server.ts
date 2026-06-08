@@ -274,7 +274,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "zenarc_update_schema",
         description:
-          "Upgrade all task YAML files across all projects to the latest schema version. Re-validates and rewrites every task file.",
+          "Upgrade all task YAML files across all projects to the latest schema version. Skips broken files and reports them so zenarc_validate_schema can repair them first. Only migrates files that pass validation but are on an old schema version.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -654,6 +654,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let upgraded = 0;
         let current = 0;
         let failed = 0;
+        const brokenFiles: { project: string; file: string; errors: string }[] = [];
 
         for (const project of registry) {
           const tasksDir = join(project.path, ".zenarc", "tasks");
@@ -674,6 +675,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               raw = (await import("yaml")).parse(content);
             } catch {
               failed++;
+              continue;
+            }
+
+            // Check if file is broken before attempting migration
+            const validation = TaskSchema.safeParse(raw);
+            if (!validation.success) {
+              const errors = validation.error.errors
+                .map((e: any) =>
+                  `${e.path?.length ? e.path.join(".") + ": " : ""}${e.message}`
+                )
+                .join("; ");
+              brokenFiles.push({ project: project.name, file: filename, errors });
               continue;
             }
 
@@ -698,7 +711,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
-        let text = `Upgraded ${upgraded} task file(s) to schema v${CURRENT_SCHEMA_VERSION}.`;
+        let text = "";
+        if (brokenFiles.length > 0) {
+          text += `Found ${brokenFiles.length} broken file(s) that must be repaired before migration:\n`;
+          for (const b of brokenFiles) {
+            text += `- ${b.project}/${b.file}: ${b.errors}\n`;
+          }
+          text += `\nRun zenarc_validate_schema first to repair these files, then run zenarc_update_schema again.\n\n`;
+        }
+        text += `Upgraded ${upgraded} task file(s) to schema v${CURRENT_SCHEMA_VERSION}.`;
         if (current > 0) {
           text += ` ${current} file(s) already at current version.`;
         }
