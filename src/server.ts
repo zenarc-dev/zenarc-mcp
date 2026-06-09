@@ -27,6 +27,7 @@ import { initializeStore } from "./store-init.js";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
+import { parse as parseYaml } from "yaml";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -129,15 +130,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "zenarc_list",
         description:
-          "List tasks across projects with optional filtering by project, status, priority, tag, or assignee.",
+          "List tasks across projects with optional filtering by project, status, priority, tag, or assignee. Call zenarc_get_config first to discover valid status values for a project, since dashboards can define custom columns.",
         inputSchema: {
           type: "object",
           properties: {
             project: { type: "string", description: "Filter by project name" },
             status: {
               type: "string",
-              enum: ["todo", "in_progress", "done", "blocked", "deferred"],
-              description: "Filter by status",
+              description: "Filter by status. Use zenarc_get_config to discover valid statuses for this project.",
             },
             priority: {
               type: "string",
@@ -170,7 +170,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "zenarc_create",
-        description: "Create a new task in a project.",
+        description:
+          "Create a new task in a project. Call zenarc_get_config first to discover valid status values for the project, since dashboards can define custom columns beyond the default todo/in_progress/done/blocked/deferred.",
         inputSchema: {
           type: "object",
           properties: {
@@ -178,7 +179,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             title: { type: "string", description: "Task title" },
             status: {
               type: "string",
-              enum: ["todo", "in_progress", "done", "blocked", "deferred"],
+              description:
+                "Task status. Use zenarc_get_config to discover valid statuses for this project. Defaults to 'todo'.",
               default: "todo",
             },
             priority: {
@@ -199,7 +201,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             files: {
               type: "array",
               items: { type: "string" },
-              description: "Related file paths",
+              description: "Related file paths. Prefer absolute paths so the web app can open them directly (e.g., /Users/name/project/src/file.ts).",
             },
             urls: {
               type: "array",
@@ -217,14 +219,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "zenarc_update",
-        description: "Update an existing task's fields.",
+        description:
+          "Update an existing task's fields. Call zenarc_get_config first to discover valid status values for the project, since dashboards can define custom columns.",
         inputSchema: {
           type: "object",
           properties: {
             taskId: { type: "string", description: "Task ID to update" },
             status: {
               type: "string",
-              enum: ["todo", "in_progress", "done", "blocked", "deferred"],
+              description:
+                "New task status. Use zenarc_get_config to discover valid statuses for this project.",
             },
             priority: {
               type: "string",
@@ -237,6 +241,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             append_description: {
               type: "string",
               description: "Append text to existing description",
+            },
+            files: {
+              type: "array",
+              items: { type: "string" },
+              description: "Replace related file paths. Prefer absolute paths so the web app can open them directly (e.g., /Users/name/project/src/file.ts).",
+            },
+            urls: {
+              type: "array",
+              items: { type: "string" },
+              description: "Replace related URLs",
             },
           },
           required: ["taskId"],
@@ -276,7 +290,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             taskId: { type: "string", description: "Task ID" },
-            file: { type: "string", description: "File path to add" },
+            file: { type: "string", description: "File path to add. Prefer an absolute path so the web app can open it directly (e.g., /Users/name/project/src/file.ts)." },
             url: { type: "string", description: "URL to add" },
             note: { type: "string", description: "Note to append" },
           },
@@ -304,6 +318,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Project name to validate/repair. If omitted, scans all projects.",
             },
           },
+        },
+      },
+      {
+        name: "zenarc_get_config",
+        description:
+          "Read a project's ZenArc configuration (dashboard column layout, display name, etc.) from .zenarc/config.yml. Call this before zenarc_create or zenarc_update to discover valid status values, since dashboards can define custom columns.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            project: {
+              type: "string",
+              description: "Project name (must exist in the registry)",
+            },
+          },
+          required: ["project"],
         },
       },
     ],
@@ -506,6 +535,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           tags,
           description,
           append_description,
+          files,
+          urls,
         } = args as {
           taskId: string;
           status?: string;
@@ -515,6 +546,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           tags?: string[];
           description?: string;
           append_description?: string;
+          files?: string[];
+          urls?: string[];
         };
 
         const registry = await getRegistry();
@@ -545,6 +578,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (description !== undefined) task.context.description = description;
         if (append_description !== undefined)
           task.context.description += "\n" + append_description;
+        if (files !== undefined) task.context.files = files;
+        if (urls !== undefined) task.context.urls = urls;
 
         task.updated_at = new Date().toISOString();
 
@@ -874,6 +909,75 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         return {
           content: [{ type: "text", text: text.trim() }],
+        };
+      }
+
+      case "zenarc_get_config": {
+        const { project } = args as { project: string };
+        const registry = await getRegistry();
+        const projectConfig = registry.find((p) => p.name === project);
+        if (!projectConfig) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Project "${project}" not found in registry. Run zenarc_scan first.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const configPath = join(projectConfig.path, ".zenarc", "config.yml");
+        let raw: unknown;
+        try {
+          const content = await readFile(configPath, "utf-8");
+          raw = parseYaml(content);
+        } catch {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No config.yml found for project "${project}". It likely uses the default dashboard columns: todo, in_progress, blocked, deferred, done.`,
+              },
+            ],
+          };
+        }
+
+        const config = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+        const columns = Array.isArray(config.columns)
+          ? config.columns.map((c: unknown) => {
+              const col = c as Record<string, unknown>;
+              return {
+                id: typeof col.id === "string" ? col.id : "",
+                label: typeof col.label === "string" ? col.label : "",
+                color: typeof col.color === "string" ? col.color : undefined,
+              };
+            }).filter((c) => c.id)
+          : [];
+
+        let text = `Project config for "${project}":\n`;
+        if (typeof config.name === "string") {
+          text += `Display name: ${config.name}\n`;
+        }
+        if (typeof config.canonical_name === "string") {
+          text += `Canonical name: ${config.canonical_name}\n`;
+        }
+        if (columns.length > 0) {
+          text += `\nDashboard columns (${columns.length}):\n`;
+          for (const col of columns) {
+            text += `- ${col.id}`;
+            if (col.label !== col.id) text += ` (${col.label})`;
+            if (col.color) text += ` [${col.color}]`;
+            text += "\n";
+          }
+          text += "\nUse the 'id' values above as valid statuses when creating or updating tasks.";
+        } else {
+          text += "\nNo custom column config found. Default columns apply:\n- todo (Todo)\n- in_progress (In Progress)\n- blocked (Blocked)\n- deferred (Deferred)\n- done (Done)";
+        }
+
+        return {
+          content: [{ type: "text", text }],
         };
       }
 
